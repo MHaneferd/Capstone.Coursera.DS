@@ -1,0 +1,560 @@
+---
+title: "week1"
+author: "Martin Haneferd"
+date: "10 mars 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Picked up at: https://www.r-bloggers.com/intro-to-text-analysis-with-r/
+and
+https://eight2late.wordpress.com/2015/05/27/a-gentle-introduction-to-text-mining-using-r/
+and
+http://handsondatascience.com/TextMiningO.pdf
+and
+https://cran.r-project.org/web/views/NaturalLanguageProcessing.html
+
+
+## Load neccesary libraries
+
+```{r, message=FALSE, cache=FALSE}
+library(lsa) # cosine function
+library(bigmemory)
+library(slam)
+library(Rstem)
+library(sentiment)
+library(plyr)
+library(dplyr)
+library(ggplot2)
+library(wordcloud)
+library(RColorBrewer)
+library(SnowballC)
+library(qdap)
+library(qdapDictionaries)
+library(scales)
+library(Rgraphviz)
+library(magrittr)
+library(tm)
+library(skmeans)
+# install.packages("tm.lexicon.GeneralInquirer", repos="http://datacube.wu.ac.at", type="source")
+library(tm.lexicon.GeneralInquirer)
+# install.packages("tm.plugin.sentiment", repos="http://R-Forge.R-project.org")
+library(tm.plugin.sentiment) 
+
+# Helpfunctions and variables:
+remove_outliers <- function(x, na.rm = TRUE, ...) {
+  qnt <- quantile(x, probs=c(0, .99), na.rm = na.rm, ...)
+  H <- 1.5 * IQR(x, na.rm = na.rm)
+  y <- x
+  y[x < (qnt[1] - H)] <- NA
+  y[x > (qnt[2] + H)] <- NA
+  y
+}
+
+# Read stopwords:
+myStopwords <- scan(file = "./stopwords_en.TXT", what = "character", sep ="\n", encoding = "UTF-8")
+
+skipWords <- function(x){ removeWords(x, stopwords("english"))
+      removeWords(x, myStopwords)
+}
+
+```
+
+## Download and unpack data
+```{r}
+# Download the zipped files containing datasets
+zipfile="./SwiftKey.zip"
+if(!file.exists("./SwiftKey.zip")){
+      fileUrl <- "https://d396qusza40orc.cloudfront.net/dsscapstone/dataset/Coursera-SwiftKey.zip"
+      download.file(fileUrl, destfile=zipfile, method="libcurl")
+      # Unpack files to data directory
+      unzip(zipfile)
+
+}
+
+# Look at the file sizes:
+file.size(c("./final/en_US/en_US.blogs.TXT","./final/en_US/en_US.news.TXT","./final/en_US/en_US.twitter.TXT"))
+
+# Just keep the english files. Remove the other languages, and the zipfile.
+unlink(c("./final/de_DE","./final/fi_FI","./final/ru_RU"), recursive = TRUE, force = TRUE) 
+unlink(zipfile)
+
+# Clean up unneccesary values from environment:
+rm(fileUrl)
+rm(zipfile)
+```
+
+## Read the files
+```{r, message=FALSE, cache=FALSE}
+
+blogs <- scan(file = "./final/en_US/en_US.blogs.TXT", what = "character", sep ="\n", skipNul=TRUE)
+
+news <- scan(file = "./final/en_US/en_US.news.TXT", what = "character", sep ="\n", skipNul=TRUE)
+
+twitter <- scan(file = "./final/en_US/en_US.twitter.TXT", what = "character", sep ="\n", skipNul=TRUE)
+
+```
+
+## Explore blogs data
+There is some outlier far out, so I remove them in the histogram plot to get a better feeling of distribution of the major blog content.
+```{r}
+# Do some cleaning
+blogs <- gsub("[^[:ascii:]]|\\’", "\'",blogs, perl=TRUE) # 
+
+# Calculate the number of words.
+numWords <- sapply(gregexpr("[[:alpha:]]+", blogs, perl=TRUE), function(x) sum(x > 0))
+# Distribution of the numer of words in the Blogs:
+summary(numWords) # See that there are some outliers!
+
+numWords.cutted <- remove_outliers(numWords)
+summary(numWords.cutted)
+hist(numWords.cutted)
+
+numChar <- sapply(blogs, nchar)
+# Distribution of char's in the Blogs:
+numChar.cutted <- remove_outliers(numChar) # Remove outliers
+summary(numChar.cutted)
+hist(numChar.cutted)
+```
+The majority of theblog posts have 10 or less words. I will remove the stop words and clean up the data, and group the posts in 0-10 words, 10-20 words and 70-80 words, and see if there are any similarities of the top ten words.
+
+### Cleaning the data
+```{r}
+b.docs <- Corpus(VectorSource(blogs))
+
+tmFuncs <- list(stemDocument,removeNumbers,
+                 removePunctuation, skipWords, stripWhitespace,
+                 trimws)
+
+# Clean and reduce to important words:
+b.docs <- tm_map(b.docs, FUN = tm_reduce, tmFuns = tmFuncs)
+
+# stemming
+docs <- tm_map(docs, stemDocument)
+# Remove numbers
+docs <- tm_map(docs, removeNumbers)
+# Remove Punctation
+docs <- tm_map(docs, removePunctuation)
+# Strip Whitespaces
+docs <- tm_map(docs, stripWhitespace)
+docs <- tm_map(docs, trimws)
+
+inspect(docs[67]) #Check
+```
+
+```{r}
+
+```
+
+## Explore Twitter data
+```{r}
+# Find number of words in each tweet
+numWords <- sapply(gregexpr("[[:alpha:]]+", twitter, perl=TRUE), function(x) sum(x > 0))
+
+# Distribution of the numer of words in the tweets:
+summary(numWords)
+hist(numWords)
+
+# Find the number of characters
+numChar <- sapply(twitter, nchar)
+# Distribution of char's in the Tweet:
+summary(numChar)
+hist(numChar)
+
+
+```
+
+## Extra exploration of the twitter data for the Quiz week 1
+```{r}
+# Divide the number of lines where the word "love" (all lowercase) occurs by the number of lines the word "hate" (all lowercase) occurs
+twitter.low <- tolower(twitter)
+sum.love <- sum(grepl("\\<love\\>", twitter.low))
+sum.hate <- sum(grepl("\\<hate\\>", twitter.low))
+sum.love / sum.hate
+
+# The one tweet in the en_US twitter data set that matches the word "biostats" says what?
+twitter.low[grepl("biostats", twitter.low)]
+
+#How many tweets have the exact characters "A computer once beat me at chess, but it was no match for me at kickboxing". (I.e. the line matches those characters exactly.)
+sum(grepl("\\<A computer once beat me at chess, but it was no match for me at kickboxing\\>", twitter))
+```
+
+## Explore News data
+```{r}
+# Find number of words in each News
+numWords <- sapply(gregexpr("[[:alpha:]]+", news, perl=TRUE), function(x) sum(x > 0))
+
+# Distribution of the numer of words in the News:
+summary(numWords)
+plot(numWords)
+
+# Find the number of characters
+numChar <- sapply(twitter, nchar)
+# Distribution of char's in the News:
+summary(numChar)
+plot(numChar)
+
+
+```
+
+
+## Sentiment analyzis.
+```{r, cache=FALSE,message=FALSE}
+#####################
+### Sentiment analyse
+#####################
+
+pos.score <- tm_term_score(TermDocumentMatrix(docs, control = list(removePunctuation = TRUE)), terms_in_General_Inquirer_categories("Positiv")) # this lists each document with number below
+
+neg.score <- tm_term_score(TermDocumentMatrix(docs, control = list(removePunctuation = TRUE)), terms_in_General_Inquirer_categories("Negativ")) 
+
+df.scores <- data.frame(positive = pos.score, negative = neg.score)
+df.scores <- transform(df.scores, net = positive - negative)
+str(df.scores)
+summary(df.scores$net)
+
+# Find three most positive and three most negative blogs
+ord <- df.scores[ order(-df.scores[,3]), ]
+most.positive <- as.numeric(rownames(head(ord,3)))
+most.negative <- as.numeric(rownames(tail(ord,3)))
+
+inspect(org.docs[most.negative])
+inspect(org.docs[most.positive])
+
+sum(  df.scores$net < 0  ) # number of negative blog posts
+sum(  df.scores$net > 0  ) # number of positive
+sum(  df.scores$net == 0  ) # Number of neutrals
+
+
+
+ 
+################################
+# Create document term matrix
+
+
+
+
+# Transposed term document matrix
+tdm <- TermDocumentMatrix(docs, control = list(wordLengths = c(3,10))) 
+
+freq.terms <- findFreqTerms(tdm, 20000)
+tdm <- tdm[freq.terms, ] # filter out by terms 
+
+m <- as.matrix(tdm)
+freq <- rowSums(m)
+ord <- order(freq)
+freq[tail(ord)] # Most frequent words 
+
+# distribution of frequencies
+# Frequency of frequencies.
+head(table(freq), 15)
+tail(table(freq), 15)
+
+# Remove sparce terms
+dim(tdm)
+tdms <- removeSparseTerms(tdm, 0.1)
+dim(tdms)
+
+# Create a document term matrix
+
+
+# Here we limit the output to those terms that occur at least 10,000 times
+#freq.terms <- findFreqTerms(dtms, 10000)
+#dtms <- dtms[,freq.terms ] # filter out by terms 
+
+
+
+
+## Plot correlations
+# Rgraphviz (Hansen et al., 2016) from the BioConductor repository for R (bioconductor.org) is
+#used to plot the network graph that displays the correlation between chosen words in the corpus.
+#Here we choose 50 of the more frequent words as the nodes and include links between words
+#when they have at least a correlation of 0.5.
+terms=findFreqTerms(dtm, lowfreq=10000)[1:50]
+
+plot(dtm,terms,corThreshold=0.5)
+
+set.seed(123)
+wordcloud(names(freq), freq, min.freq = 100, colors=brewer.pal(6, "Dark2"))
+
+# Words like “can” and “one”  give us no information about the subject matter of the documents in which they occur. They can therefore be eliminated without loss. Indeed, they ought to have been eliminated by the stopword removal we did earlier. However, since such words occur very frequently – virtually in all documents – we can remove them by enforcing bounds when creating the DTM, like so:
+
+dtm <- DocumentTermMatrix(docs, control=list(wordLengths=c(3, 15), bounds = list(global = c(1000,10000))))
+
+# Delete rows that are zero:
+row_freqr <-  row_sums(dtm)
+dtm <- dtm[row_freqr>0,]
+dim(dtm)
+
+####################
+#####3
+####### Cluster
+#######
+#################
+
+# This sparse percentage denotes the proportion of empty elements. A sparse parameter of 0.7 means that we select from those terms which are less than 70% empty. We set the sparsity at 0.95 so that terms with at least that sparse percentage will be removed. So the terms we accept can be very empty- at most 95% empty. Then we can coerce the TD matrix into a regular matrix.
+tdm <- TermDocumentMatrix(docs, control=list(wordLengths=c(3, 15), bounds = list(global = c(1000,10000))))
+
+tdms <- removeSparseTerms(tdm, 0.99)
+dim(tdms)
+# Delete rows that are zero:
+col_freqr <-  col_sums(tdms)
+tdms <- tdms[,row_freqr>0]
+dim(tdms)
+
+set.seed(1000)
+sam <- sample(seq(1, 12056), 12000)
+tdms <- tdms[,sam]
+
+memory.limit(size=60000)
+m <- as.matrix(tdms)
+
+memory.limit(size=60000)
+#rownames(m) <- 1:nrow(m)
+
+## hierarchical clustering
+library(proxy)
+#compute distance between document vectors
+d <- dist(m, method="cosine")
+
+hc <- hclust(d, method="average")
+
+plot(hc, hang=-1)
+
+cl <- cutree(hc, 15)
+
+table(cl)
+
+findFreqTerms(tdms[cl==1], 5)
+
+
+#run hierarchical clustering using Ward’s method
+groups <- hclust(d,method="ward.D")
+#plot dendogram, use hang to ensure that labels fall below tree
+plot(groups, hang=-1)
+
+rect.hclust(groups, k=5)
+
+
+
+
+# dtm <- DocumentTermMatrix(docs, control=list(wordLengths=c(4, 15)))
+
+# Here we have told R to include only those words that occur in  500 to 2000 documents. We have also enforced  lower and upper limit to length of the words included (between 4 and 20 characters).
+
+
+# Inspect dtm
+dtm
+
+freqr <-  col_sums(dtm)
+length(freqr)
+#create sort order (asc)
+ordr <- order(freqr,decreasing=TRUE)
+#inspect most frequently occurring terms
+freqr[head(ordr)]
+# The output:
+#    one   will   like    can   time   just 
+# 136263 116009 111796 109971 108426 100612 
+# Dous not tell much, lets see what the least output is:
+#inspect least frequently occurring terms
+freqr[tail(ordr)]
+
+# keep only  words that occur >1000 times in all docs
+#dtm2 <- dtm[,which( freqr > 30000)]
+#dtm2
+#freqr <-  col_sums(dtm2)
+
+# Delete rows that are zero:
+row_freqr <-  row_sums(dtm)
+dtm <- dtm[row_freqr>0,]
+
+# I will investigate the words freedom and sea a little bit further. To see the associations
+# We can also find associations with a word, specifying a correlation limit
+
+assosiations <- findAssocs(dtm, c("film","game"), corlimit=0.2)
+
+
+d <- data.frame(word = colnames(dtm),freq=freqr)
+dd <- head(d[order(d$freq,decreasing=TRUE),], 20)
+
+barplot(d[1:10,]$freq, las = 2, names.arg = d[1:10,]$word, col ="lightblue", main ="Most frequent words", ylab = "Word frequencies")
+
+
+##########################################
+#############
+#############    Clustering
+#############
+##########################################
+## do tfxidf
+dtm_tfxidf <- weightTfIdf(dtm)
+inspect(dtm_tfxidf[1:10, 5001:5010])
+
+## do document clustering
+
+### k-means (this uses euclidean distance)
+m <- as.matrix(dtm_tfxidf)
+rownames(m) <- 1:nrow(m)
+
+### don't forget to normalize the vectors so Euclidean makes sense
+norm_eucl <- function(m) m/apply(m, MARGIN=1, FUN=function(x) sum(x^2)^.5)
+m_norm <- norm_eucl(m)
+
+
+### Remove NA's
+m_norm[is.na(m_norm)] <- 0
+
+### cluster into 10 clusters
+cl <- kmeans(m_norm, 10)
+cl
+
+table(cl$cluster)
+
+### show clusters using the first 2 principal components
+plot(prcomp(m_norm)$x, col=cl$cl)
+
+findFreqTerms(dtm_tfxidf[cl$cluster==1], 50)
+inspect(reuters[which(cl$cluster==1)])
+
+
+### this is going to take 4-ever (O(n^2))
+memory.limit(size=40000)
+d <- dist(m, method="cosine")
+hc <- hclust(d, method="average")
+plot(hc, hang=-1)
+
+cl <- cutree(hc, 5)
+table(cl)
+
+findFreqTerms(dtm[cl==1], 50)
+
+
+
+
+###################################
+# Quantitive analyzis of text
+words <- dtms %>% as.matrix %>% colnames %>% (function(x) x[nchar(x) < 20])
+
+length(words)
+
+head(words, 15)
+
+summary(nchar(words))
+
+table(nchar(words))
+
+dist_tab(nchar(words))
+
+
+
+
+
+
+###################################
+
+freq <- rollup(tdm, 2, na.rm=TRUE, FUN = sum)
+class(freq)
+
+# Explore the document term matrix
+sumfreq <- rowSums(as.matrix(freq))
+length(sumfreq)
+
+
+# Sentiment alayzis:
+install.packages("syuzhet")
+library('syuzhet')
+d<-get_nrc_sentiment(blogs)
+td<-data.frame(t(d))
+
+td_new <- data.frame(rowSums(td))
+#The function rowSums computes column sums across rows for each level of a grouping variable.
+ 
+#Transformation and  cleaning
+names(td_new)[1] <- "count"
+td_new <- cbind("sentiment" = rownames(td_new), td_new)
+rownames(td_new) <- NULL
+td_new2<-td_new[1:8,]
+
+
+#Visualisation
+library("ggplot2")
+qplot(sentiment, data=td_new2, weight=count, geom="bar",fill=sentiment)+ggtitle("Blog sentiments")
+
+
+
+
+
+# Clustering
+
+# clus: a skmeans object
+# dtm: a Document Term Matrix
+# first: eg. 10 most frequent words per cluster
+# unique: if FALSE all words of the DTM will be used
+#         if TRUE only cluster specific words will be used 
+
+
+
+# result: List with words and frequency of words 
+#         If unique = TRUE, only cluster specific words will be considered.
+#         Words which occur in more than one cluster will be ignored.
+
+
+
+mfrq_words_per_cluster <- function(clus, dtm, first = 10, unique = TRUE){
+  if(!any(class(clus) == "skmeans")) return("clus must be an skmeans object")
+
+  dtm <- as.simple_triplet_matrix(dtm)
+  indM <- table(names(clus$cluster), clus$cluster) == 1 # generate bool matrix
+
+  hfun <- function(ind, dtm){ # help function, summing up words
+    if(is.null(dtm[ind, ]))  dtm[ind, ] else  col_sums(dtm[ind, ])
+  }
+  frqM <- apply(indM, 2, hfun, dtm = dtm)
+
+  if(unique){
+    # eliminate word which occur in several clusters
+    frqM <- frqM[rowSums(frqM > 0) == 1, ] 
+  }
+  # export to list, order and take first x elements 
+  res <- lapply(1:ncol(frqM), function(i, mat, first)
+                head(sort(mat[, i], decreasing = TRUE), first),
+                mat = frqM, first = first)
+
+  names(res) <- paste0("CLUSTER_", 1:ncol(frqM))
+  return(res)
+}
+
+# dtm3 has no rows with zero.
+
+LDA(dtm, 30)
+
+rownames(dtm3) <- paste0("Doc_", 1:dim(dtm3)[1])
+clus <- skmeans(dtm3, 3)
+# weightBin(x)
+# Download CLUTO at:
+# http://glaros.dtc.umn.edu/gkhome/cluto/cluto/download
+
+file.create("cluto.file.test")
+con <- file("cluto.file.test", open = "rw") 
+writeCM(dtm3, con)
+readCM(con, clabel = NULL)
+
+close(con)
+
+cluto <- doc2mat(dtm3)
+
+clus <- skmeans(dtm3, method = "CLUTO", k = 4, control = list(nruns = 20))
+
+mfrq_words_per_cluster(clus, dtm3)
+mfrq_words_per_cluster(clus, dtm3, unique = FALSE)
+
+
+```
+
+```{r}
+
+```
+
+
