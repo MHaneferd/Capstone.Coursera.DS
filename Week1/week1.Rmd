@@ -6,7 +6,7 @@ output: html_document
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(echo = TRUE, cache = TRUE)
 ```
 
 Picked up at: https://www.r-bloggers.com/intro-to-text-analysis-with-r/
@@ -39,6 +39,7 @@ library(Rgraphviz)
 library(magrittr)
 library(tm)
 library(skmeans)
+library(syuzhet) # Sentiment analyzis
 # install.packages("tm.lexicon.GeneralInquirer", repos="http://datacube.wu.ac.at", type="source")
 library(tm.lexicon.GeneralInquirer)
 # install.packages("tm.plugin.sentiment", repos="http://R-Forge.R-project.org")
@@ -57,10 +58,13 @@ remove_outliers <- function(x, na.rm = TRUE, ...) {
 # Read stopwords:
 myStopwords <- scan(file = "./stopwords_en.TXT", what = "character", sep ="\n", encoding = "UTF-8")
 
+myStopwords <- c(myStopwords,"time","year","month","day","week","hour","minute") # Get rid of time variables
 skipWords <- function(x){ removeWords(x, stopwords("english"))
       removeWords(x, myStopwords)
 }
 
+# Set seed so it can be reproduced
+set.seed(123)
 ```
 
 ## Download and unpack data
@@ -90,7 +94,7 @@ rm(zipfile)
 ## Read the files
 ```{r, message=FALSE, cache=FALSE}
 
-blogs <- scan(file = "./final/en_US/en_US.blogs.TXT", what = "character", sep ="\n", skipNul=TRUE)
+blogs <- scan(file = "./final/en_US/en_US.blogs.TXT", what = "character", sep ="\n", encoding = "UTF-8", skipNul=TRUE)
 
 news <- scan(file = "./final/en_US/en_US.news.TXT", what = "character", sep ="\n", skipNul=TRUE)
 
@@ -102,8 +106,8 @@ twitter <- scan(file = "./final/en_US/en_US.twitter.TXT", what = "character", se
 There is some outlier far out, so I remove them in the histogram plot to get a better feeling of distribution of the major blog content.
 ```{r}
 # Do some cleaning
-blogs <- gsub("[^[:ascii:]]|\\’", "\'",blogs, perl=TRUE) # 
-
+blogs <- gsub("[^[:ascii:]]|\\’", "\'",blogs, perl=TRUE)
+blogs <- tolower(blogs)
 # Calculate the number of words.
 numWords <- sapply(gregexpr("[[:alpha:]]+", blogs, perl=TRUE), function(x) sum(x > 0))
 # Distribution of the numer of words in the Blogs:
@@ -119,7 +123,7 @@ numChar.cutted <- remove_outliers(numChar) # Remove outliers
 summary(numChar.cutted)
 hist(numChar.cutted)
 ```
-The majority of theblog posts have 10 or less words. I will remove the stop words and clean up the data, and group the posts in 0-10 words, 10-20 words and 70-80 words, and see if there are any similarities of the top ten words.
+The majority of theblog posts have 10 or less words. I will remove the stop words and clean up the data, and group the blogs in 1-10 words, 11-20 words and 71-80 words, and see if there are any similarities of the top ten words.
 
 ### Cleaning the data
 ```{r}
@@ -132,22 +136,123 @@ tmFuncs <- list(stemDocument,removeNumbers,
 # Clean and reduce to important words:
 b.docs <- tm_map(b.docs, FUN = tm_reduce, tmFuns = tmFuncs)
 
-# stemming
-docs <- tm_map(docs, stemDocument)
-# Remove numbers
-docs <- tm_map(docs, removeNumbers)
-# Remove Punctation
-docs <- tm_map(docs, removePunctuation)
-# Strip Whitespaces
-docs <- tm_map(docs, stripWhitespace)
-docs <- tm_map(docs, trimws)
-
-inspect(docs[67]) #Check
+# Transforming the tm corpus to vector of strings
+blogs.reduce<-sapply(b.docs, as.character)
+blogs.reduce[67] #Check
 ```
 
+### Checking the distribution after reduction
+The gap from 10'th to 20'th seems to be reduced. It looks more linear.
 ```{r}
+# count words
+numWords <- sapply(gregexpr("[[:alpha:]]+", blogs.reduce, perl=TRUE), function(x) sum(x > 0))
+
+# remove the ones that only have 2 or less words
+length(blogs.reduce) # Before
+blogs.reduce <- blogs.reduce[numWords > 2]
+length(blogs.reduce) #After 
+
+# Do a re-count
+numWords <- sapply(gregexpr("[[:alpha:]]+", blogs.reduce, perl=TRUE), function(x) sum(x > 0))
+
+# Distribution of the numer of words in the Blogs after reduction:
+numWords.cutted <- remove_outliers(numWords)
+summary(numWords.cutted)
+hist(numWords.cutted)
 
 ```
+
+### Find the high frequencies of the words
+```{r}
+# Create av Document term matrix
+b.dtm <- DocumentTermMatrix(b.docs)
+
+# Find and plot the most used terms in the three sections of blogs
+b.freq <- sort(col_sums(b.dtm), decreasing=TRUE)   
+wf <- data.frame(word=names(head(b.freq, 15)), freq=head(b.freq, 15))
+
+# Plot
+ggplot(wf, aes(x = reorder(word, -freq), y = freq)) + 
+      geom_bar(stat = "identity") +
+      xlab("Terms (Word)") + 
+      ylab("Frequency")
+```
+
+### Assosiactions in the blogs for the word love
+There did not seem to be any associations to the word love, so I will not get into further investigation of that.
+```{r}
+# specifying a correlation limit of 0.2 (Not much)
+b.assoc <- findAssocs(b.dtm, c("love"), corlimit=0.2) 
+b.assoc
+```
+### Make a word cloud of the 50 most used terms
+```{r}
+wordcloud(names(head(b.freq, 50)), head(b.freq, 50), colors=brewer.pal(6, "Dark2"))
+```
+It looks that the majority of the blog posts is about everyday life; work, love, book, people, friends, family, school, hope, etc..
+
+### Sentiment alayzis of the blogs
+Lets 1st find out the number and distribution of positive and negative blogs.
+```{r}
+b.tdm <- TermDocumentMatrix(b.docs)
+# Score the blogs in positive or negative
+pos.score <- tm_term_score(b.tdm, terms_in_General_Inquirer_categories("Positiv")) # this lists each document with number below
+
+neg.score <- tm_term_score(b.tdm, terms_in_General_Inquirer_categories("Negativ")) 
+
+df.scores <- data.frame(positive = pos.score, negative = neg.score)
+df.scores <- transform(df.scores, net = positive - negative)
+# Find the spread of the scores
+summary(df.scores$net)
+
+# Look at the histogram of the pos/neg blogs
+hist(df.scores$net, breaks = 100)
+# Looks like there are more negative blogs than positive according to the histogram plot, but check this further
+
+# Find three most positive and three most negative blogs
+ord <- df.scores[ order(-df.scores[,3]), ]
+most.positive <- as.numeric(rownames(head(ord,3)))
+most.negative <- as.numeric(rownames(tail(ord,3)))
+
+# Investigate what they are about:
+# The negative:
+blogs[most.negative]
+
+# The positive:
+blogs[most.positive]
+
+# Count the positive, negative and neutral blogs
+sum(  df.scores$net < 0  ) # number of negative blog posts
+sum(  df.scores$net > 0  ) # number of positive
+sum(  df.scores$net == 0  ) # Number of neutrals
+
+# It is clear that there are more positive than negative blog posts. The histogram above must be adjusted for the neutrals in some ways.
+```
+
+And 2nd find out the mood of the blogs:
+```{r}
+b.sentiment <- get_nrc_sentiment(blogs)
+b.df.sentiment <-data.frame(t(b.sentiment))
+
+b.td_new <- data.frame(rowSums(b.df.sentiment))
+#The function rowSums computes column sums across rows for each level of a grouping variable.
+ 
+#Transformation and  cleaning
+names(b.td_new)[1] <- "count"
+b.td_new <- cbind("sentiment" = rownames(b.td_new), b.td_new)
+rownames(b.td_new) <- NULL
+b.td_new<-b.td_new[1:8,]
+
+#Visualisation
+ggplot(b.td_new, aes(x = reorder(sentiment, -count), y = count)) + 
+      geom_bar(stat = "identity", aes(fill=sentiment)) +
+      xlab("Terms (Word)") + 
+      ylab("Frequency")
+```
+The mood of the blogs looks like it's filled of trust, anticipation and joy.
+
+### Try clustering the data
+I will try clustering the data
 
 ## Explore Twitter data
 ```{r}
@@ -201,94 +306,8 @@ plot(numChar)
 ```
 
 
-## Sentiment analyzis.
+## Cluster
 ```{r, cache=FALSE,message=FALSE}
-#####################
-### Sentiment analyse
-#####################
-
-pos.score <- tm_term_score(TermDocumentMatrix(docs, control = list(removePunctuation = TRUE)), terms_in_General_Inquirer_categories("Positiv")) # this lists each document with number below
-
-neg.score <- tm_term_score(TermDocumentMatrix(docs, control = list(removePunctuation = TRUE)), terms_in_General_Inquirer_categories("Negativ")) 
-
-df.scores <- data.frame(positive = pos.score, negative = neg.score)
-df.scores <- transform(df.scores, net = positive - negative)
-str(df.scores)
-summary(df.scores$net)
-
-# Find three most positive and three most negative blogs
-ord <- df.scores[ order(-df.scores[,3]), ]
-most.positive <- as.numeric(rownames(head(ord,3)))
-most.negative <- as.numeric(rownames(tail(ord,3)))
-
-inspect(org.docs[most.negative])
-inspect(org.docs[most.positive])
-
-sum(  df.scores$net < 0  ) # number of negative blog posts
-sum(  df.scores$net > 0  ) # number of positive
-sum(  df.scores$net == 0  ) # Number of neutrals
-
-
-
- 
-################################
-# Create document term matrix
-
-
-
-
-# Transposed term document matrix
-tdm <- TermDocumentMatrix(docs, control = list(wordLengths = c(3,10))) 
-
-freq.terms <- findFreqTerms(tdm, 20000)
-tdm <- tdm[freq.terms, ] # filter out by terms 
-
-m <- as.matrix(tdm)
-freq <- rowSums(m)
-ord <- order(freq)
-freq[tail(ord)] # Most frequent words 
-
-# distribution of frequencies
-# Frequency of frequencies.
-head(table(freq), 15)
-tail(table(freq), 15)
-
-# Remove sparce terms
-dim(tdm)
-tdms <- removeSparseTerms(tdm, 0.1)
-dim(tdms)
-
-# Create a document term matrix
-
-
-# Here we limit the output to those terms that occur at least 10,000 times
-#freq.terms <- findFreqTerms(dtms, 10000)
-#dtms <- dtms[,freq.terms ] # filter out by terms 
-
-
-
-
-## Plot correlations
-# Rgraphviz (Hansen et al., 2016) from the BioConductor repository for R (bioconductor.org) is
-#used to plot the network graph that displays the correlation between chosen words in the corpus.
-#Here we choose 50 of the more frequent words as the nodes and include links between words
-#when they have at least a correlation of 0.5.
-terms=findFreqTerms(dtm, lowfreq=10000)[1:50]
-
-plot(dtm,terms,corThreshold=0.5)
-
-set.seed(123)
-wordcloud(names(freq), freq, min.freq = 100, colors=brewer.pal(6, "Dark2"))
-
-# Words like “can” and “one”  give us no information about the subject matter of the documents in which they occur. They can therefore be eliminated without loss. Indeed, they ought to have been eliminated by the stopword removal we did earlier. However, since such words occur very frequently – virtually in all documents – we can remove them by enforcing bounds when creating the DTM, like so:
-
-dtm <- DocumentTermMatrix(docs, control=list(wordLengths=c(3, 15), bounds = list(global = c(1000,10000))))
-
-# Delete rows that are zero:
-row_freqr <-  row_sums(dtm)
-dtm <- dtm[row_freqr>0,]
-dim(dtm)
-
 ####################
 #####3
 ####### Cluster
@@ -462,25 +481,6 @@ sumfreq <- rowSums(as.matrix(freq))
 length(sumfreq)
 
 
-# Sentiment alayzis:
-install.packages("syuzhet")
-library('syuzhet')
-d<-get_nrc_sentiment(blogs)
-td<-data.frame(t(d))
-
-td_new <- data.frame(rowSums(td))
-#The function rowSums computes column sums across rows for each level of a grouping variable.
- 
-#Transformation and  cleaning
-names(td_new)[1] <- "count"
-td_new <- cbind("sentiment" = rownames(td_new), td_new)
-rownames(td_new) <- NULL
-td_new2<-td_new[1:8,]
-
-
-#Visualisation
-library("ggplot2")
-qplot(sentiment, data=td_new2, weight=count, geom="bar",fill=sentiment)+ggtitle("Blog sentiments")
 
 
 
