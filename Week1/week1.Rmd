@@ -42,7 +42,9 @@ library(skmeans)
 library(syuzhet) # Sentiment analyzis
 library(proxy) # Hierachal clustering
 library(igraph) # Fancy graphing
-library(topicmodels)
+library(topicmodels) #LDA function
+library(Matrix)
+library(RWeka) 
 
 # install.packages("tm.lexicon.GeneralInquirer", repos="http://datacube.wu.ac.at", type="source")
 library(tm.lexicon.GeneralInquirer)
@@ -66,6 +68,10 @@ myStopwords <- c(myStopwords,"time","year","month","day","week","hour","minute")
 skipWords <- function(x){ removeWords(x, stopwords("english"))
       removeWords(x, myStopwords)
 }
+
+BigramTokenizer <- function(x)
+    unlist(lapply(ngrams(words(x), 2), paste, collapse = " "), use.names = FALSE)
+
 
 # Set seed so it can be reproduced
 set.seed(123)
@@ -281,7 +287,8 @@ Funny. I tought there were more on the oil as in oil-well.. Not as a oil in kitc
 ### Topic modeling
 ```{r}
 set.seed(123)
-b.dtm.x <- DocumentTermMatrix(b.docs, control=list(wordLengths=c(3, 15), bounds = list(global = c(1000,10000))))
+b.dtm.x <- DocumentTermMatrix(b.docs, control=list(wordLengths=c(3, 15), bounds = list(global = c(1000,10000),tokenize=BigramTokenizer,weighting = weightTf)))
+
 dim(b.dtm.x)
 # Remove zero rows.
 freqr.x <- row_sums(b.dtm.x)
@@ -296,24 +303,30 @@ terms(myLda, 10)
 It is hard to see the difference between the topics. They somewhat fall into same categories.
 
 ### Social network analyzis
+Just for test.. How is the terms connected...
 Reference: https://rdatamining.wordpress.com/2012/05/17/an-example-of-social-network-analysis-with-r-using-package-igraph/
 ```{r}
 ### Load Data
+b.dtm.x.x <- DocumentTermMatrix(b.docs)
+# Concentrate on 20 random picked terms.
+b.dtm.x.15 <- b.dtm.x.x[,findFreqTerms(b.dtm.x.x)[7001:7020]]
 
-# inspect part of the matrix
-b.tdm[5:10,1:20]
+# Remove zero rows.
+freqr.x <- row_sums(b.dtm.x.15)
+b.dtm.x.15 <- b.dtm.x.15[freqr.x >0,]
+dim(b.dtm.x.15)
 
-# Transform Data into an Adjacency Matrix
-
+### Transform Data into an Adjacency Matrix
 # change it to a Boolean matrix
-b.tdm[b.tdm>=1] <- 1
+b.dtm.x.15[b.dtm.x.15>=1] <- 1
+
 # transform into a term-term adjacency matrix
-b.termMatrix <- b.tdm %*% t(b.tdm)
-# inspect terms numbered 5 to 10
-b.termMatrix[5:10,5:10]
+b.termMatrix <- sparseMatrix(j=b.dtm.x.15$i, i=b.dtm.x.15$j, x=b.dtm.x.15$v) %*% t(sparseMatrix(j=b.dtm.x.15$i, i=b.dtm.x.15$j, x=b.dtm.x.15$v))
 
 ### Build a Graph
-
+dim(b.termMatrix)
+# Check sums that the matrix is symmetric:
+b.termMatrix[1:20,1:20]
 # Now we have built a term-term adjacency matrix, where the rows and columns represents terms, and every entry is the number of co-occurrences of two terms. Next we can build a graph with graph.adjacency() from package igraph.
 
 # build a graph from the above matrix
@@ -321,14 +334,14 @@ g <- graph.adjacency(b.termMatrix, weighted=T, mode = "undirected")
 # remove loops
 g <- simplify(g)
 # set labels and degrees of vertices
-V(g)$label <- V(g)$name
+V(g)$label <-  b.dtm.x.15$dimnames$Terms
 V(g)$degree <- degree(g)
 
 ### Plot a Graph
 
 # set seed to make the layout reproducible
-set.seed(3952)
-layout1 <- layout.fruchterman.reingold(g)
+set.seed(3443)
+layout1 <- layout.reingold.tilford(g, circular=T)
 plot(g, layout=layout1)
 ```
 
@@ -448,7 +461,81 @@ ggplot(t.td_new, aes(x = reorder(sentiment, -count), y = count)) +
 ```
 The mood of the tweets looks like it's filled of trust, anticipation and joy. This is somewhat the same tendency as with the blogs.
 
+### Social network analyzis
+How is the terms connected...
+```{r}
+### Load Data
+t.dtm.x.x <- DocumentTermMatrix(t.docs)
+# Concentrate on 20 random picked terms.
+t.dtm.x.15 <- t.dtm.x.x[,findFreqTerms(t.dtm.x.x)[7001:7020]]
 
+# Remove zero rows.
+freqr.t <- row_sums(t.dtm.x.15)
+t.dtm.x.15 <- t.dtm.x.15[freqr.t >0,]
+dim(t.dtm.x.15)
+
+### Transform Data into an Adjacency Matrix
+# change it to a Boolean matrix
+t.dtm.x.15[t.dtm.x.15>=1] <- 1
+
+# transform into a term-term adjacency matrix
+t.termMatrix <- sparseMatrix(j=t.dtm.x.15$i, i=t.dtm.x.15$j, x=t.dtm.x.15$v) %*% t(sparseMatrix(j=t.dtm.x.15$i, i=t.dtm.x.15$j, x=t.dtm.x.15$v))
+
+### Build a Graph
+dim(t.termMatrix)
+# Check sums that the matrix is symmetric:
+t.termMatrix[1:20,1:20]
+# Now we have built a term-term adjacency matrix, where the rows and columns represents terms, and every entry is the number of co-occurrences of two terms. Next we can build a graph with graph.adjacency() from package igraph.
+
+# build a graph from the above matrix
+g <- graph.adjacency(t.termMatrix, weighted=T, mode = "undirected")
+# remove loops
+g <- simplify(g)
+# set labels and degrees of vertices
+V(g)$label <-  t.dtm.x.15$dimnames$Terms
+V(g)$degree <- degree(g)
+
+### Plot a Graph
+
+# set seed to make the layout reproducible
+set.seed(3443)
+layout1 <- layout.reingold.tilford(g, circular=T)
+plot(g, layout=layout1)
+```
+
+### Topic modeling
+```{r}
+set.seed(123)
+t.dtm.x <- DocumentTermMatrix(t.docs, control=list(wordLengths=c(3, 15), bounds = list(global = c(1000,10000),tokenize=BigramTokenizer,weighting = weightTf)))
+
+dim(t.dtm.x)
+# Remove zero rows.
+freqr.t <- row_sums(t.dtm.x)
+t.dtm.x <- t.dtm.x[freqr.t >0,]
+dim(t.dtm.x)
+
+#This take time!!
+library(doParallel)
+cluster <- makeCluster(detectCores(logical = TRUE) - 1) # leave one CPU spare...
+registerDoParallel(cluster)
+
+clusterEvalQ(cluster, {
+   library(topicmodels)
+})
+k <- 8
+clusterExport(cluster, c("t.dtm.x", "k"))
+
+myLda <- foreach() %dopar% {
+   insideLda <- LDA(t.dtm.x, k = k)
+   return(perplexity(insideLda))
+}
+
+# myLda <- LDA(t.dtm.x, k=8)
+
+stopCluster(cluster)
+
+terms(myLda, 10)
+```
 
 ### Find out what the twitter messages is about
 ```{r}
