@@ -515,33 +515,10 @@ t.dtm.x <- t.dtm.x[freqr.t >0,]
 dim(t.dtm.x)
 
 #This take time!!
-library(doParallel)
-cluster <- makeCluster(detectCores(logical = TRUE) - 1) # leave one CPU spare...
-registerDoParallel(cluster)
-
-clusterEvalQ(cluster, {
-   library(topicmodels)
-})
-k <- 8
-clusterExport(cluster, c("t.dtm.x", "k"))
-
-myLda <- foreach() %dopar% {
-   insideLda <- LDA(t.dtm.x, k = k)
-   return(perplexity(insideLda))
-}
-
-# myLda <- LDA(t.dtm.x, k=8)
-
-stopCluster(cluster)
+myLda <- LDA(t.dtm.x, k=8)
 
 terms(myLda, 10)
 ```
-
-### Find out what the twitter messages is about
-```{r}
-
-```
-
 
 ## Extra exploration of the twitter data for the Quiz week 1
 ```{r}
@@ -568,7 +545,7 @@ summary(numWords)
 plot(numWords)
 
 # Find the number of characters
-numChar <- sapply(twitter, nchar)
+numChar <- sapply(news, nchar)
 # Distribution of char's in the News:
 summary(numChar)
 plot(numChar)
