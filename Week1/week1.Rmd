@@ -6,21 +6,31 @@ output: html_document
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE, cache = TRUE)
+knitr::opts_chunk$set(echo = TRUE, cache = TRUE, warning=FALSE, message=FALSE)
 ```
 
-Picked up at: https://www.r-bloggers.com/intro-to-text-analysis-with-r/
-and
+# Overview
+This is the Week 1 of the Capstone at Data Science - Coursera.
+I try to analyze the blogs, tweets and news.
+There is also the answers to the quiz for week-1.
+
+As everybody else, I needed to figure out NLP and text mining.
+I have listed up some of the resources (Not listed in the Coursera meterial) below:
+
+https://www.r-bloggers.com/intro-to-text-analysis-with-r/
+
 https://eight2late.wordpress.com/2015/05/27/a-gentle-introduction-to-text-mining-using-r/
-and
+
 http://handsondatascience.com/TextMiningO.pdf
-and
+
 https://cran.r-project.org/web/views/NaturalLanguageProcessing.html
+
+https://rdatamining.wordpress.com/2012/05/17/an-example-of-social-network-analysis-with-r-using-package-igraph/
 
 
 ## Load neccesary libraries
 
-```{r, message=FALSE, cache=FALSE}
+```{r, message=FALSE}
 library(lsa) # cosine function
 library(bigmemory)
 library(slam)
@@ -102,7 +112,7 @@ rm(zipfile)
 ```
 
 ## Read the files
-```{r, message=FALSE, cache=FALSE}
+```{r, message=TRUE}
 
 blogs <- scan(file = "./final/en_US/en_US.blogs.TXT", what = "character", sep ="\n", encoding = "UTF-8", skipNul=TRUE)
 
@@ -217,19 +227,7 @@ summary(df.scores$net)
 
 # Look at the histogram of the pos/neg blogs
 hist(df.scores$net, breaks = 100)
-# Looks like there are more negative blogs than positive according to the histogram plot, but check this further
-
-# Find three most positive and three most negative blogs
-ord <- df.scores[ order(-df.scores[,3]), ]
-most.positive <- as.numeric(rownames(head(ord,3)))
-most.negative <- as.numeric(rownames(tail(ord,3)))
-
-# Investigate what they are about:
-# The negative:
-blogs[most.negative]
-
-# The positive:
-blogs[most.positive]
+# Looks like there are more negative blogs than positive according to the histogram plot.
 
 # Count the positive, negative and neutral blogs
 sum(  df.scores$net < 0  ) # number of negative blog posts
@@ -304,7 +302,6 @@ It is hard to see the difference between the topics. They somewhat fall into sam
 
 ### Social network analyzis
 Just for test.. How is the terms connected...
-Reference: https://rdatamining.wordpress.com/2012/05/17/an-example-of-social-network-analysis-with-r-using-package-igraph/
 ```{r}
 ### Load Data
 b.dtm.x.x <- DocumentTermMatrix(b.docs)
@@ -535,21 +532,164 @@ twitter.low[grepl("biostats", twitter.low)]
 sum(grepl("\\<A computer once beat me at chess, but it was no match for me at kickboxing\\>", twitter))
 ```
 
+
 ## Explore News data
+There is some outlier far out, so I remove them in the histogram plot to get a better feeling of distribution of the major blog content.
 ```{r}
-# Find number of words in each News
+# Do some cleaning
+news <- gsub("[^[:ascii:]]|\\’", "\'",news, perl=TRUE)
+news <- tolower(news)
+# Calculate the number of words.
 numWords <- sapply(gregexpr("[[:alpha:]]+", news, perl=TRUE), function(x) sum(x > 0))
+# Distribution of the numer of words in the Blogs:
+summary(numWords) # See that there are some outliers!
 
-# Distribution of the numer of words in the News:
-summary(numWords)
-plot(numWords)
+numWords.cutted <- remove_outliers(numWords)
+summary(numWords.cutted)
+hist(numWords.cutted)
 
-# Find the number of characters
 numChar <- sapply(news, nchar)
-# Distribution of char's in the News:
-summary(numChar)
-plot(numChar)
+# Distribution of char's in the Blogs:
+numChar.cutted <- remove_outliers(numChar) # Remove outliers
+summary(numChar.cutted)
+hist(numChar.cutted)
+```
 
+### Cleaning the data
+```{r}
+n.docs <- Corpus(VectorSource(news))
+
+tmFuncs <- list(stemDocument,removeNumbers,
+                 removePunctuation, skipWords, stripWhitespace,
+                 trimws)
+
+# Clean and reduce to important words:
+n.docs <- tm_map(n.docs, FUN = tm_reduce, tmFuns = tmFuncs)
+
+# Transforming the tm corpus to vector of strings
+news.reduce<-sapply(n.docs, as.character)
+news.reduce[67] #Check
+```
+
+
+### Find the high frequencies of the words
+```{r}
+# Create av Document term matrix
+n.dtm <- DocumentTermMatrix(n.docs)
+
+# Find and plot the most used terms in the three sections of blogs
+n.freq <- sort(col_sums(n.dtm), decreasing=TRUE)   
+wf <- data.frame(word=names(head(n.freq, 15)), freq=head(n.freq, 15))
+
+# Plot
+ggplot(wf, aes(x = reorder(word, -freq), y = freq)) + 
+      geom_bar(stat = "identity") +
+      xlab("Terms (Word)") + 
+      ylab("Frequency")
+```
+
+State seems to be the most used word.
+
+### Make a word cloud of the 50 most used terms
+```{r}
+wordcloud(names(head(n.freq, 50)), head(n.freq, 50), colors=brewer.pal(6, "Dark2"))
+```
+
+
+### Categorize the corpus in topics.
+```{r}
+set.seed(123)
+n.dtm.x <- DocumentTermMatrix(n.docs, control=list(wordLengths=c(3, 15), tokenize=BigramTokenizer,weighting = weightTf))
+
+dim(n.dtm.x)
+# Remove zero rows.
+freqr.n <- row_sums(n.dtm.x)
+n.dtm.x <- n.dtm.x[freqr.n >0,]
+dim(n.dtm.x)
+
+#This take time!!
+myLda <- LDA(n.dtm.x, k=8) 
+
+terms(myLda, 10)
 
 ```
 
+### Sentiment alayzis of the news
+Lets 1st find out the number and distribution of positive and negative news
+```{r}
+n.tdm <- TermDocumentMatrix(n.docs)
+# Score the news in positive or negative
+pos.score <- tm_term_score(n.tdm, terms_in_General_Inquirer_categories("Positiv")) # this lists each document with number below
+
+neg.score <- tm_term_score(n.tdm, terms_in_General_Inquirer_categories("Negativ")) 
+
+df.scores <- data.frame(positive = pos.score, negative = neg.score)
+df.scores <- transform(df.scores, net = positive - negative)
+# Find the spread of the scores
+summary(df.scores$net)
+
+# Look at the histogram of the pos/neg tweets
+hist(df.scores$net, breaks = 100)
+rug(df.scores$net)
+# Find three most positive and three most negative news
+ord <- df.scores[ order(-df.scores[,3]), ]
+most.positive <- as.numeric(rownames(head(ord,3)))
+most.negative <- as.numeric(rownames(tail(ord,3)))
+
+# Investigate what they are about:
+# The negative:
+twitter[most.negative]
+
+# The positive:
+twitter[most.positive]
+
+# Count the positive, negative and neutral news
+sum(  df.scores$net < 0  ) # number of negative news
+sum(  df.scores$net > 0  ) # number of positive news
+sum(  df.scores$net == 0  ) # Number of neutrals news
+
+```
+
+And 2nd find out the mood of the news:
+```{r}
+n.sentiment <- get_nrc_sentiment(news)
+n.df.sentiment <-data.frame(t(n.sentiment))
+
+n.td_new <- data.frame(rowSums(n.df.sentiment))
+#The function rowSums computes column sums across rows for each level of a grouping variable.
+ 
+#Transformation and  cleaning
+names(n.td_new)[1] <- "count"
+n.td_new <- cbind("sentiment" = rownames(n.td_new), n.td_new)
+rownames(n.td_new) <- NULL
+n.td_new<-n.td_new[1:8,]
+
+#Visualisation
+ggplot(n.td_new, aes(x = reorder(sentiment, -count), y = count)) + 
+      geom_bar(stat = "identity", aes(fill=sentiment)) +
+      xlab("Terms (Word)") + 
+      ylab("Frequency")
+```
+The mood of the news is a little bit different than the blogs and tweets. Fear is 3rd place.
+
+### Try clustering the data
+I will try clustering the data based on the "state" term
+```{r}
+n.tdm.state <- TermDocumentMatrix(n.docs, list(dictionary = c("state")))
+#Remove the rows that does not contain the word state
+col_freqr <- col_sums(n.tdm.state)
+n.tdm.state.only <- n.tdm[, col_freqr>0]
+dim(n.tdm.state.only)
+
+# Reduce the matrix to only contain the most used words in the news
+n.tdm.state.only <- n.tdm.state.only[findFreqTerms(n.tdm.state.only, 300), ]
+dim(n.tdm.state.only)
+
+memory.limit(size=60000) # Just chack I have enough memory.
+m <- as.matrix(n.tdm.state.only)
+d <- dist(m, method="cosine")
+#run hierarchical clustering using Ward’s method
+hc <- hclust(d, method="ward.D")
+plot(hc, hang=-1)
+rect.hclust(hc, k=5)
+```
