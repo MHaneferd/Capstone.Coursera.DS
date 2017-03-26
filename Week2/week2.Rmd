@@ -1,0 +1,15 @@
+---
+title: "week2"
+author: "Martin Haneferd"
+date: "26 mars 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, cache = TRUE, warning=FALSE, message=FALSE)
+```
+
+# Overview
+This is the Week 2 of the Capstone at Data Science - Coursera.
+
+I have listed up some of the resources (Not listed in the Coursera meterial) below:
